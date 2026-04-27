@@ -44,6 +44,22 @@ export const t = {
     sessionLive: "élő",
   },
 
+  align: {
+    title: "Térkép igazítása",
+    description:
+      "Húzd a sarokjelölőket úgy, hogy a feltöltött térkép utcái egybeessenek a háttérben látható OSM utcákkal. A csúszkával állíthatod az átlátszóságot.",
+    nw: "ÉNy",
+    ne: "ÉK",
+    sw: "DNy",
+    opacity: "Átlátszóság",
+    reset: "Vissza az eredetihez",
+    save: "Igazítás mentése",
+    saving: "Mentés…",
+    needGeoref:
+      "Először végezd el a 4-pontos georeferálást, hogy legyen kiindulási pozíció.",
+    openAlign: "Igazítás finomhangolása",
+  },
+
   maps: {
     title: "Térképek",
     description:

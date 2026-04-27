@@ -29,42 +29,53 @@ export default async function AdminMaps() {
         {maps && maps.length > 0 && (
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {maps.map((m) => (
-              <li key={m.id}>
-                <Link
-                  href={`/admin/maps/${m.id}/georef`}
-                  className="flex gap-3 rounded-2xl border bg-card p-3 hover:border-primary/40 hover:shadow-sm transition"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={m.image_url}
-                    alt={m.label}
-                    className="w-24 h-24 object-cover rounded-xl border bg-muted"
-                  />
-                  <div className="flex-1 min-w-0 flex flex-col">
-                    <div className="font-medium truncate">{m.label}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      {m.image_w}×{m.image_h}
-                    </div>
-                    <div className="mt-auto">
+              <li key={m.id} className="flex gap-3 rounded-2xl border bg-card p-3 hover:border-primary/40 hover:shadow-sm transition">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={m.image_url}
+                  alt={m.label}
+                  className="w-24 h-24 object-cover rounded-xl border bg-muted"
+                />
+                <div className="flex-1 min-w-0 flex flex-col">
+                  <div className="font-medium truncate">{m.label}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {m.image_w}×{m.image_h}
+                  </div>
+                  <div className="mt-1">
+                    <span
+                      className={
+                        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium " +
+                        (m.georef_transform
+                          ? "bg-primary/10 text-primary"
+                          : "bg-amber-100 text-amber-700")
+                      }
+                    >
                       <span
                         className={
-                          "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium " +
-                          (m.georef_transform
-                            ? "bg-primary/10 text-primary"
-                            : "bg-amber-100 text-amber-700")
+                          "size-1.5 rounded-full " +
+                          (m.georef_transform ? "bg-primary" : "bg-amber-500")
                         }
-                      >
-                        <span
-                          className={
-                            "size-1.5 rounded-full " +
-                            (m.georef_transform ? "bg-primary" : "bg-amber-500")
-                          }
-                        />
-                        {m.georef_transform ? t.maps.georeferenced : t.maps.needsGeoref}
-                      </span>
-                    </div>
+                      />
+                      {m.georef_transform ? t.maps.georeferenced : t.maps.needsGeoref}
+                    </span>
                   </div>
-                </Link>
+                  <div className="mt-auto pt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                    <Link
+                      href={`/admin/maps/${m.id}/georef`}
+                      className="text-primary hover:underline"
+                    >
+                      {m.georef_transform ? t.maps.regeorefAction : t.maps.georefAction}
+                    </Link>
+                    {m.georef_transform && (
+                      <Link
+                        href={`/admin/maps/${m.id}/align`}
+                        className="text-primary hover:underline"
+                      >
+                        {t.align.openAlign}
+                      </Link>
+                    )}
+                  </div>
+                </div>
               </li>
             ))}
           </ul>
