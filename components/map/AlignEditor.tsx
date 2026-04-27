@@ -1,162 +1,114 @@
 "use client";
 
 import "./leaflet-bootstrap";
+import "leaflet-distortableimage/dist/vendor.css";
+import "leaflet-distortableimage/dist/leaflet.distortableimage.css";
+
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, Marker, TileLayer, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import L, { type LatLngLiteral } from "leaflet";
-import { fitAffine, pixelToLngLat, type AffineTransform, type ControlPoint } from "@/lib/georef";
+import "leaflet-distortableimage";
+
+import { pixelToLngLat, type AffineTransform, type ControlPoint } from "@/lib/georef";
 import { Button } from "@/components/ui/button";
 import { t } from "@/lib/i18n";
 
-type Corner = "nw" | "ne" | "sw";
+type Corners = {
+  nw: LatLngLiteral;
+  ne: LatLngLiteral;
+  sw: LatLngLiteral;
+  se: LatLngLiteral;
+};
 
-type State = Record<Corner, LatLngLiteral>;
-
-function cornersFromTransform(transform: AffineTransform, w: number, h: number): State {
-  return {
-    nw: ((p) => ({ lat: p.lat, lng: p.lng }))(pixelToLngLat(transform, 0, 0)),
-    ne: ((p) => ({ lat: p.lat, lng: p.lng }))(pixelToLngLat(transform, w, 0)),
-    sw: ((p) => ({ lat: p.lat, lng: p.lng }))(pixelToLngLat(transform, 0, h)),
-  };
+interface DistortableLayer extends L.ImageOverlay {
+  getCorners(): L.LatLng[];
+  setOpacity(o: number): this;
 }
 
-const ALIGN_PANE = "alignOverlayPane";
+interface DistortableFactory {
+  distortableImageOverlay(url: string, opts?: Record<string, unknown>): DistortableLayer;
+}
 
-/** Render the image as a CSS-transformed <img> inside a dedicated map pane. */
-function RotatedImageOverlay({
+function cornersFromTransform(t: AffineTransform, w: number, h: number): Corners {
+  const xy = (x: number, y: number) => {
+    const p = pixelToLngLat(t, x, y);
+    return { lat: p.lat, lng: p.lng };
+  };
+  return { nw: xy(0, 0), ne: xy(w, 0), se: xy(w, h), sw: xy(0, h) };
+}
+
+function DistortableImage({
   url,
-  state,
-  imageW,
-  imageH,
+  initial,
   opacity,
+  onChange,
 }: {
   url: string;
-  state: State;
-  imageW: number;
-  imageH: number;
+  initial: Corners;
   opacity: number;
+  onChange: (c: Corners) => void;
 }) {
   const map = useMap();
-  const imgRef = useRef<HTMLImageElement | null>(null);
+  const layerRef = useRef<DistortableLayer | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  // Create the pane + img once, destroy on unmount.
   useEffect(() => {
-    let pane = map.getPane(ALIGN_PANE);
-    if (!pane) {
-      pane = map.createPane(ALIGN_PANE);
-      pane.style.zIndex = "350"; // above tilePane (200), below markerPane (600)
-      pane.style.pointerEvents = "none";
-    }
-    const img = document.createElement("img");
-    img.style.position = "absolute";
-    img.style.top = "0";
-    img.style.left = "0";
-    img.style.transformOrigin = "0 0";
-    img.style.pointerEvents = "none";
-    img.style.userSelect = "none";
-    img.style.willChange = "transform";
-    img.style.display = "block";
-    img.draggable = false;
-    img.alt = "";
-    pane.appendChild(img);
-    imgRef.current = img;
+    const corners = [
+      L.latLng(initial.nw.lat, initial.nw.lng),
+      L.latLng(initial.ne.lat, initial.ne.lng),
+      L.latLng(initial.sw.lat, initial.sw.lng),
+      L.latLng(initial.se.lat, initial.se.lng),
+    ];
+
+    const factory = L as unknown as DistortableFactory;
+    const layer = factory.distortableImageOverlay(url, {
+      corners,
+      editable: true,
+      mode: "distort",
+      selected: true,
+      suppressToolbar: false,
+    });
+    layer.addTo(map);
+    layerRef.current = layer;
+
+    const handle = () => {
+      const c = layer.getCorners();
+      onChangeRef.current({
+        nw: { lat: c[0].lat, lng: c[0].lng },
+        ne: { lat: c[1].lat, lng: c[1].lng },
+        sw: { lat: c[2].lat, lng: c[2].lng },
+        se: { lat: c[3].lat, lng: c[3].lng },
+      });
+    };
+
+    // The plugin emits a few different events depending on the active edit
+    // tool; listen broadly so we never miss a change.
+    layer.on("update", handle);
+    layer.on("dragend", handle);
+    layer.on("rotateend", handle);
+    layer.on("scaleend", handle);
+    layer.on("distortend", handle);
+
     return () => {
-      img.remove();
-      imgRef.current = null;
+      layer.off("update", handle);
+      layer.off("dragend", handle);
+      layer.off("rotateend", handle);
+      layer.off("scaleend", handle);
+      layer.off("distortend", handle);
+      layer.remove();
+      layerRef.current = null;
     };
-  }, [map]);
+    // We only want this to run once per mounted url; corner edits shouldn't
+    // remount the layer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, url]);
 
-  // Update src / size / opacity when they change.
   useEffect(() => {
-    const img = imgRef.current;
-    if (!img) return;
-    if (img.getAttribute("src") !== url) img.src = url;
-    img.style.width = `${imageW}px`;
-    img.style.height = `${imageH}px`;
-    img.style.opacity = String(opacity);
-  }, [url, imageW, imageH, opacity]);
-
-  // Recompute the matrix transform on every map move / zoom / corner change.
-  useEffect(() => {
-    const img = imgRef.current;
-    if (!img) return;
-    const update = () => {
-      const pNW = map.latLngToLayerPoint(state.nw);
-      const pNE = map.latLngToLayerPoint(state.ne);
-      const pSW = map.latLngToLayerPoint(state.sw);
-      const a = (pNE.x - pNW.x) / imageW;
-      const b = (pNE.y - pNW.y) / imageW;
-      const c = (pSW.x - pNW.x) / imageH;
-      const d = (pSW.y - pNW.y) / imageH;
-      img.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, ${pNW.x}, ${pNW.y})`;
-    };
-    update();
-    map.on("zoom", update);
-    map.on("zoomend", update);
-    map.on("move", update);
-    map.on("moveend", update);
-    map.on("viewreset", update);
-    return () => {
-      map.off("zoom", update);
-      map.off("zoomend", update);
-      map.off("move", update);
-      map.off("moveend", update);
-      map.off("viewreset", update);
-    };
-  }, [map, state, imageW, imageH]);
+    layerRef.current?.setOpacity(opacity);
+  }, [opacity]);
 
   return null;
-}
-
-const handleIcon = (label: string, color: string) =>
-  L.divIcon({
-    className: "",
-    iconSize: [0, 0],
-    html: `
-      <div style="
-        transform:translate(-50%,-50%);
-        display:flex;flex-direction:column;align-items:center;gap:2px;
-      ">
-        <div style="
-          width:24px;height:24px;border-radius:50%;
-          background:${color};border:3px solid white;
-          box-shadow:0 2px 6px rgba(0,0,0,0.35);
-        "></div>
-        <div style="
-          background:white;border:1px solid ${color};color:#111;
-          font:700 10px/1 system-ui;padding:2px 5px;border-radius:9999px;
-          white-space:nowrap;
-        ">${label}</div>
-      </div>
-    `,
-  });
-
-function CornerHandle({
-  position,
-  onChange,
-  label,
-  color,
-}: {
-  position: LatLngLiteral;
-  onChange: (p: LatLngLiteral) => void;
-  label: string;
-  color: string;
-}) {
-  const icon = useMemo(() => handleIcon(label, color), [label, color]);
-  return (
-    <Marker
-      position={position}
-      icon={icon}
-      draggable
-      eventHandlers={{
-        drag: (e) => {
-          const m = e.target as L.Marker;
-          const ll = m.getLatLng();
-          onChange({ lat: ll.lat, lng: ll.lng });
-        },
-      }}
-    />
-  );
 }
 
 export function AlignEditor({
@@ -172,27 +124,37 @@ export function AlignEditor({
   initialTransform: AffineTransform;
   onSave: (points: ControlPoint[]) => Promise<void> | void;
 }) {
-  const [state, setState] = useState<State>(() =>
-    cornersFromTransform(initialTransform, imageW, imageH),
+  const initialCorners = useMemo(
+    () => cornersFromTransform(initialTransform, imageW, imageH),
+    [initialTransform, imageW, imageH],
   );
+  const [corners, setCorners] = useState<Corners>(initialCorners);
   const [opacity, setOpacity] = useState(0.55);
   const [saving, setSaving] = useState(false);
+  const [resetKey, setResetKey] = useState(0);
 
   const center = useMemo<[number, number]>(() => {
-    const lats = Object.values(state).map((p) => p.lat);
-    const lngs = Object.values(state).map((p) => p.lng);
-    return [(Math.min(...lats) + Math.max(...lats)) / 2, (Math.min(...lngs) + Math.max(...lngs)) / 2];
-  }, [state]);
+    const lats = Object.values(initialCorners).map((p) => p.lat);
+    const lngs = Object.values(initialCorners).map((p) => p.lng);
+    return [
+      (Math.min(...lats) + Math.max(...lats)) / 2,
+      (Math.min(...lngs) + Math.max(...lngs)) / 2,
+    ];
+  }, [initialCorners]);
 
-  const reset = () => setState(cornersFromTransform(initialTransform, imageW, imageH));
+  const reset = () => {
+    setCorners(initialCorners);
+    setResetKey((k) => k + 1);
+  };
 
   const save = async () => {
     setSaving(true);
     try {
       const points: ControlPoint[] = [
-        { px: 0, py: 0, lat: state.nw.lat, lng: state.nw.lng },
-        { px: imageW, py: 0, lat: state.ne.lat, lng: state.ne.lng },
-        { px: 0, py: imageH, lat: state.sw.lat, lng: state.sw.lng },
+        { px: 0, py: 0, lat: corners.nw.lat, lng: corners.nw.lng },
+        { px: imageW, py: 0, lat: corners.ne.lat, lng: corners.ne.lng },
+        { px: imageW, py: imageH, lat: corners.se.lat, lng: corners.se.lng },
+        { px: 0, py: imageH, lat: corners.sw.lat, lng: corners.sw.lng },
       ];
       await onSave(points);
     } finally {
@@ -200,57 +162,21 @@ export function AlignEditor({
     }
   };
 
-  // Sanity-check the current placement still fits an affine
-  const ok = useMemo(() => {
-    try {
-      fitAffine([
-        { px: 0, py: 0, lat: state.nw.lat, lng: state.nw.lng },
-        { px: imageW, py: 0, lat: state.ne.lat, lng: state.ne.lng },
-        { px: 0, py: imageH, lat: state.sw.lat, lng: state.sw.lng },
-      ]);
-      return true;
-    } catch {
-      return false;
-    }
-  }, [state, imageW, imageH]);
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 lg:h-[calc(100vh-12rem)]">
       <div className="h-[60vh] lg:h-auto rounded-2xl overflow-hidden border bg-muted shadow-sm">
-        <MapContainer
-          center={center}
-          zoom={15}
-          className="h-full w-full"
-          zoomControl={true}
-        >
+        <MapContainer center={center} zoom={15} className="h-full w-full" zoomControl={true}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <RotatedImageOverlay
+          <DistortableImage
+            // remount on reset so the plugin's internal corner state matches ours
+            key={resetKey}
             url={imageUrl}
-            state={state}
-            imageW={imageW}
-            imageH={imageH}
+            initial={initialCorners}
             opacity={opacity}
-          />
-          <CornerHandle
-            position={state.nw}
-            label={t.align.nw}
-            color="#dc2626"
-            onChange={(p) => setState((s) => ({ ...s, nw: p }))}
-          />
-          <CornerHandle
-            position={state.ne}
-            label={t.align.ne}
-            color="#16a34a"
-            onChange={(p) => setState((s) => ({ ...s, ne: p }))}
-          />
-          <CornerHandle
-            position={state.sw}
-            label={t.align.sw}
-            color="#2563eb"
-            onChange={(p) => setState((s) => ({ ...s, sw: p }))}
+            onChange={setCorners}
           />
         </MapContainer>
       </div>
@@ -279,16 +205,17 @@ export function AlignEditor({
         </div>
 
         <div className="rounded-2xl border bg-card p-4 space-y-2 text-xs">
-          <Row label={t.align.nw} color="#dc2626" p={state.nw} />
-          <Row label={t.align.ne} color="#16a34a" p={state.ne} />
-          <Row label={t.align.sw} color="#2563eb" p={state.sw} />
+          <Row label={t.align.nw} color="#dc2626" p={corners.nw} />
+          <Row label={t.align.ne} color="#16a34a" p={corners.ne} />
+          <Row label={t.align.sw} color="#2563eb" p={corners.sw} />
+          <Row label="DK" color="#a16207" p={corners.se} />
         </div>
 
         <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" onClick={reset} className="h-11 rounded-xl">
             {t.align.reset}
           </Button>
-          <Button onClick={save} disabled={!ok || saving} className="h-11 rounded-xl">
+          <Button onClick={save} disabled={saving} className="h-11 rounded-xl">
             {saving ? t.align.saving : t.align.save}
           </Button>
         </div>
@@ -308,3 +235,4 @@ function Row({ label, color, p }: { label: string; color: string; p: LatLngLiter
     </div>
   );
 }
+
