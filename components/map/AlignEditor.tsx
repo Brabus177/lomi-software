@@ -7,6 +7,9 @@ import "leaflet-distortableimage/dist/leaflet.distortableimage.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import L, { type LatLngLiteral } from "leaflet";
+// vendor.js bundles L.Toolbar2 (leaflet-toolbar) which the plugin requires.
+// Must be imported BEFORE the plugin itself.
+import "leaflet-distortableimage/dist/vendor.js";
 import "leaflet-distortableimage";
 
 import { pixelToLngLat, type AffineTransform, type ControlPoint } from "@/lib/georef";
