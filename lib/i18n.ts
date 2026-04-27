@@ -118,6 +118,15 @@ export const t = {
     copy: "másol",
     copied: "másolva",
     qrShow: "QR-kód mutatása",
+    end: "Menet lezárása",
+    ending: "Lezárás…",
+    reopen: "Menet újranyitása",
+    reopening: "Újranyitás…",
+    confirmEnd: "Biztosan lezárod ezt a menetet? A csapatok linkje továbbra is működik, de a menet „lezárva” állapotba kerül.",
+    endedAt: "Lezárva",
+    downloadPdf: "Letöltés PDF-ben (zsákjelölésekkel)",
+    generatingPdf: "PDF készítése…",
+    downloadFilename: "menet",
   },
 
   field: {

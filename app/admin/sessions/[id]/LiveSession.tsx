@@ -1,11 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import type { AffineTransform } from "@/lib/georef";
 import type { TeamLive } from "@/components/map/LiveTeamLayer";
+import { Button } from "@/components/ui/button";
+import { exportBagsPdf } from "@/lib/export-bags-pdf";
 import { t } from "@/lib/i18n";
 
 const PdfBasemapMap = dynamic(
@@ -23,12 +26,14 @@ export function LiveSession({
   sessionId,
   title,
   date,
+  endedAt,
   map,
   teams,
 }: {
   sessionId: string;
   title: string;
   date: string;
+  endedAt: string | null;
   map: {
     id: string;
     label: string;
@@ -39,6 +44,9 @@ export function LiveSession({
   };
   teams: TeamRow[];
 }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<null | "ending" | "reopening" | "exporting">(null);
+  const isEnded = !!endedAt;
   const [live, setLive] = useState<Record<string, TeamLive>>(() =>
     Object.fromEntries(
       teams.map((tm) => [tm.id, { id: tm.id, name: tm.name, color: tm.color, trail: [], bags: [] }]),
@@ -140,10 +148,107 @@ export function LiveSession({
       </div>
 
       <aside className="lg:overflow-y-auto space-y-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{title || map.label}</h1>
-          <div className="text-xs text-muted-foreground">{date}</div>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl font-semibold tracking-tight flex-1 min-w-0">{title || map.label}</h1>
+            <span
+              className={
+                "shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium " +
+                (isEnded ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary")
+              }
+            >
+              <span
+                className={
+                  "size-1.5 rounded-full " + (isEnded ? "bg-muted-foreground" : "bg-primary animate-pulse")
+                }
+              />
+              {isEnded ? t.admin.sessionEnded : t.admin.sessionLive}
+            </span>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {date}
+            {endedAt && ` · ${t.session.endedAt}: ${new Date(endedAt).toLocaleString("hu-HU")}`}
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            {!isEnded && (
+              <Button
+                variant="destructive"
+                disabled={busy !== null}
+                className="h-9 rounded-lg text-xs"
+                onClick={async () => {
+                  if (!confirm(t.session.confirmEnd)) return;
+                  setBusy("ending");
+                  const sb = supabaseBrowser();
+                  const { error } = await sb
+                    .from("sessions")
+                    .update({ ended_at: new Date().toISOString() })
+                    .eq("id", sessionId);
+                  setBusy(null);
+                  if (error) alert(error.message);
+                  else router.refresh();
+                }}
+              >
+                {busy === "ending" ? t.session.ending : t.session.end}
+              </Button>
+            )}
+            {isEnded && (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={busy !== null}
+                  className="h-9 rounded-lg text-xs"
+                  onClick={async () => {
+                    setBusy("reopening");
+                    const sb = supabaseBrowser();
+                    const { error } = await sb
+                      .from("sessions")
+                      .update({ ended_at: null })
+                      .eq("id", sessionId);
+                    setBusy(null);
+                    if (error) alert(error.message);
+                    else router.refresh();
+                  }}
+                >
+                  {busy === "reopening" ? t.session.reopening : t.session.reopen}
+                </Button>
+                <Button
+                  disabled={busy !== null}
+                  className="h-9 rounded-lg text-xs"
+                  onClick={async () => {
+                    setBusy("exporting");
+                    try {
+                      const bagsForExport = Object.values(live).flatMap((tm) =>
+                        tm.bags.map((b) => ({
+                          lat: b.lat,
+                          lng: b.lng,
+                          teamColor: tm.color,
+                          teamName: tm.name,
+                        })),
+                      );
+                      await exportBagsPdf({
+                        imageUrl: map.image_url,
+                        imageW: map.image_w,
+                        imageH: map.image_h,
+                        transform: map.georef_transform,
+                        bags: bagsForExport,
+                        filename: `${t.session.downloadFilename}-${date}`,
+                        title: title || map.label,
+                      });
+                    } catch (e) {
+                      alert(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                >
+                  {busy === "exporting" ? t.session.generatingPdf : t.session.downloadPdf}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
+
         <ul className="space-y-2">
           {teams.map((tm) => {
             const stats = live[tm.id];

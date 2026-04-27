@@ -8,7 +8,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
 
   const { data: session } = await supabase
     .from("sessions")
-    .select("id, date, title, map:map_id(id, label, image_url, image_w, image_h, georef_transform)")
+    .select("id, date, title, ended_at, map:map_id(id, label, image_url, image_w, image_h, georef_transform)")
     .eq("id", id)
     .maybeSingle();
 
@@ -25,6 +25,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
       sessionId={session.id}
       title={session.title ?? ""}
       date={session.date}
+      endedAt={session.ended_at}
       map={session.map as unknown as {
         id: string;
         label: string;
