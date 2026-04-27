@@ -20,7 +20,9 @@ function cornersFromTransform(transform: AffineTransform, w: number, h: number):
   };
 }
 
-/** Render the image as a CSS-transformed <img> inside the map's overlayPane. */
+const ALIGN_PANE = "alignOverlayPane";
+
+/** Render the image as a CSS-transformed <img> inside a dedicated map pane. */
 function RotatedImageOverlay({
   url,
   state,
@@ -37,10 +39,15 @@ function RotatedImageOverlay({
   const map = useMap();
   const imgRef = useRef<HTMLImageElement | null>(null);
 
+  // Create the pane + img once, destroy on unmount.
   useEffect(() => {
-    const pane = map.getPanes().overlayPane;
+    let pane = map.getPane(ALIGN_PANE);
+    if (!pane) {
+      pane = map.createPane(ALIGN_PANE);
+      pane.style.zIndex = "350"; // above tilePane (200), below markerPane (600)
+      pane.style.pointerEvents = "none";
+    }
     const img = document.createElement("img");
-    img.src = url;
     img.style.position = "absolute";
     img.style.top = "0";
     img.style.left = "0";
@@ -48,23 +55,28 @@ function RotatedImageOverlay({
     img.style.pointerEvents = "none";
     img.style.userSelect = "none";
     img.style.willChange = "transform";
+    img.style.display = "block";
     img.draggable = false;
+    img.alt = "";
     pane.appendChild(img);
     imgRef.current = img;
     return () => {
       img.remove();
       imgRef.current = null;
     };
-  }, [map, url]);
+  }, [map]);
 
+  // Update src / size / opacity when they change.
   useEffect(() => {
     const img = imgRef.current;
     if (!img) return;
-    img.style.opacity = String(opacity);
+    if (img.getAttribute("src") !== url) img.src = url;
     img.style.width = `${imageW}px`;
     img.style.height = `${imageH}px`;
-  }, [opacity, imageW, imageH]);
+    img.style.opacity = String(opacity);
+  }, [url, imageW, imageH, opacity]);
 
+  // Recompute the matrix transform on every map move / zoom / corner change.
   useEffect(() => {
     const img = imgRef.current;
     if (!img) return;
@@ -76,14 +88,20 @@ function RotatedImageOverlay({
       const b = (pNE.y - pNW.y) / imageW;
       const c = (pSW.x - pNW.x) / imageH;
       const d = (pSW.y - pNW.y) / imageH;
-      const e = pNW.x;
-      const f = pNW.y;
-      img.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, ${e}, ${f})`;
+      img.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, ${pNW.x}, ${pNW.y})`;
     };
     update();
-    map.on("zoom move zoomend moveend viewreset", update);
+    map.on("zoom", update);
+    map.on("zoomend", update);
+    map.on("move", update);
+    map.on("moveend", update);
+    map.on("viewreset", update);
     return () => {
-      map.off("zoom move zoomend moveend viewreset", update);
+      map.off("zoom", update);
+      map.off("zoomend", update);
+      map.off("move", update);
+      map.off("moveend", update);
+      map.off("viewreset", update);
     };
   }, [map, state, imageW, imageH]);
 
