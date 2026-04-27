@@ -1,0 +1,10 @@
+{
+  "name": "Lomi Route Tracker",
+  "short_name": "Lomi",
+  "description": "Field-team garbage-route tracker.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#2563eb",
+  "icons": []
+}
