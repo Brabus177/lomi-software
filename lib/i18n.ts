@@ -47,7 +47,7 @@ export const t = {
   align: {
     title: "Térkép igazítása",
     description:
-      "Húzd a sarokjelölőket úgy, hogy a feltöltött térkép utcái egybeessenek a háttérben látható OSM utcákkal. A csúszkával állíthatod az átlátszóságot.",
+      "Koppints a térképképre a szerkesztéshez. Húzd a sarkokat a torzításhoz, középről mozgatáshoz, a forgatás-fogantyúval forgathatod. A csúszkával az átlátszóságot állíthatod.",
     nw: "ÉNy",
     ne: "ÉK",
     sw: "DNy",

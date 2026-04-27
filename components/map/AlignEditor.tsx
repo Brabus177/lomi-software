@@ -57,53 +57,69 @@ function DistortableImage({
   onChangeRef.current = onChange;
 
   useEffect(() => {
-    const corners = [
-      L.latLng(initial.nw.lat, initial.nw.lng),
-      L.latLng(initial.ne.lat, initial.ne.lng),
-      L.latLng(initial.sw.lat, initial.sw.lng),
-      L.latLng(initial.se.lat, initial.se.lng),
-    ];
+    let cancelled = false;
+    let layer: DistortableLayer | null = null;
+    let handle: (() => void) | null = null;
 
-    const factory = L as unknown as DistortableFactory;
-    const layer = factory.distortableImageOverlay(url, {
-      corners,
-      editable: true,
-      mode: "distort",
-      selected: true,
-      suppressToolbar: false,
-    });
-    layer.addTo(map);
-    layerRef.current = layer;
-
-    const handle = () => {
-      const c = layer.getCorners();
-      onChangeRef.current({
-        nw: { lat: c[0].lat, lng: c[0].lng },
-        ne: { lat: c[1].lat, lng: c[1].lng },
-        sw: { lat: c[2].lat, lng: c[2].lng },
-        se: { lat: c[3].lat, lng: c[3].lng },
+    // Defer creation by one tick so React StrictMode double-mounts can't race
+    // the plugin's internal toolbar/handle setup against our cleanup.
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      const corners = [
+        L.latLng(initial.nw.lat, initial.nw.lng),
+        L.latLng(initial.ne.lat, initial.ne.lng),
+        L.latLng(initial.sw.lat, initial.sw.lng),
+        L.latLng(initial.se.lat, initial.se.lng),
+      ];
+      const factory = L as unknown as DistortableFactory;
+      // Note: do NOT pass `selected: true` — the plugin tries to attach a
+      // toolbar synchronously before its `_map` ref is fully wired, which
+      // crashes under React StrictMode. The user taps the image to select.
+      layer = factory.distortableImageOverlay(url, {
+        corners,
+        editable: true,
+        mode: "distort",
+        suppressToolbar: false,
       });
-    };
+      layer.addTo(map);
+      layerRef.current = layer;
 
-    // The plugin emits a few different events depending on the active edit
-    // tool; listen broadly so we never miss a change.
-    layer.on("update", handle);
-    layer.on("dragend", handle);
-    layer.on("rotateend", handle);
-    layer.on("scaleend", handle);
-    layer.on("distortend", handle);
+      handle = () => {
+        if (!layer) return;
+        const c = layer.getCorners();
+        onChangeRef.current({
+          nw: { lat: c[0].lat, lng: c[0].lng },
+          ne: { lat: c[1].lat, lng: c[1].lng },
+          sw: { lat: c[2].lat, lng: c[2].lng },
+          se: { lat: c[3].lat, lng: c[3].lng },
+        });
+      };
+      layer.on("update", handle);
+      layer.on("dragend", handle);
+      layer.on("rotateend", handle);
+      layer.on("scaleend", handle);
+      layer.on("distortend", handle);
+    }, 0);
 
     return () => {
-      layer.off("update", handle);
-      layer.off("dragend", handle);
-      layer.off("rotateend", handle);
-      layer.off("scaleend", handle);
-      layer.off("distortend", handle);
-      layer.remove();
+      cancelled = true;
+      clearTimeout(timer);
+      if (layer) {
+        try {
+          if (handle) {
+            layer.off("update", handle);
+            layer.off("dragend", handle);
+            layer.off("rotateend", handle);
+            layer.off("scaleend", handle);
+            layer.off("distortend", handle);
+          }
+          layer.remove();
+        } catch {
+          // plugin internals occasionally throw on removal — ignore
+        }
+      }
       layerRef.current = null;
     };
-    // We only want this to run once per mounted url; corner edits shouldn't
-    // remount the layer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, url]);
 
